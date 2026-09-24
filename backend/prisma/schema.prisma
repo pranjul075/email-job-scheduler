@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmailStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  RATE_LIMITED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  PROCESSING
+  COMPLETED
+  PARTIALLY_FAILED
+  CANCELLED
+}
+
+model User {
+  id              String            @id @default(uuid())
+  googleId        String?           @unique
+  email           String            @unique
+  passwordHash    String?
+  name            String
+  avatar          String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  senders         Sender[]
+  campaigns       Campaign[]
+  scheduledEmails ScheduledEmail[]
+  slackConnection SlackConnection?
+
+  @@index([email])
+  @@index([googleId])
+}
+
+model Sender {
+  id              String            @id @default(uuid())
+  userId          String
+  name            String
+  email           String
+  host            String            @default("smtp.ethereal.email")
+  port            Int               @default(587)
+  secure          Boolean           @default(false)
+  user            String?
+  pass            String?
+  isDefault       Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  userRef         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns       Campaign[]
+  scheduledEmails ScheduledEmail[]
+
+  @@unique([userId, email])
+  @@index([userId])
+  @@index([email])
+}
+
+model Campaign {
+  id              String            @id @default(uuid())
+  userId          String
+  senderId        String
+  name            String
+  subject         String
+  body            String
+  delaySeconds    Int               @default(2)
+  hourlyLimit     Int               @default(200)
+  scheduledAt     DateTime          @default(now())
+  status          CampaignStatus    @default(SCHEDULED)
+  totalRecipients Int               @default(0)
+  sentCount       Int               @default(0)
+  failedCount     Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  userRef         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  senderRef       Sender            @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  scheduledEmails ScheduledEmail[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model ScheduledEmail {
+  id                 String       @id @default(uuid())
+  campaignId         String
+  senderId           String
+  userId             String
+  recipientEmail     String
+  subject            String
+  body               String
+  scheduledAt        DateTime
+  status             EmailStatus  @default(PENDING)
+  sentAt             DateTime?
+  error              String?
+  bullJobId          String?
+  idempotencyKey     String       @unique
+  etherealMessageId  String?
+  etherealPreviewUrl String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  userRef            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaignRef        Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  senderRef          Sender       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, scheduledAt])
+  @@index([senderId, status, scheduledAt])
+  @@index([campaignId])
+  @@index([bullJobId])
+  @@index([status])
+}
+
+model SlackConnection {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  teamId      String
+  teamName    String
+  channelId   String?
+  channelName String?
+  accessToken String
+  botUserId   String?
+  webhookUrl  String?
+  scope       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userRef     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
