@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker-runner.ts",
     "e2e": "tsx tests/e2e.test.ts",
     "build": "tsc",
     "start": "node dist/server.js",

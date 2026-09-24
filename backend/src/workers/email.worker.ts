@@ -15,6 +15,11 @@ import { searchService } from '../services/elasticsearch.service.js';
 export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => {
   const { scheduledEmailId } = job.data;
 
+  console.log('WORKER_JOB_RECEIVED', {
+    jobId: job.id,
+    scheduledEmailId,
+  });
+
   const email = await prisma.scheduledEmail.findUnique({
     where: { id: scheduledEmailId },
     include: {
@@ -32,6 +37,11 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
     return;
   }
 
+  const lockAcquired = await acquireEmailLock(email.id);
+  if (!lockAcquired) {
+    return;
+  }
+
   const claimCount = await prisma.scheduledEmail.updateMany({
     where: {
       id: email.id,
@@ -43,11 +53,7 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
   });
 
   if (claimCount.count === 0) {
-    return;
-  }
-
-  const lockAcquired = await acquireEmailLock(email.id);
-  if (!lockAcquired) {
+    await releaseEmailLock(email.id);
     return;
   }
 
@@ -68,12 +74,24 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
         await releaseEmailLock(email.id);
 
         const delay = Math.max(500, rateLimit.retryAfterMs || 1000);
+        const newJobId = `delay_${email.id}_${Date.now()}`;
+        console.log('JOB_RESCHEDULED', {
+          emailId: email.id,
+          reason: 'MIN_DELAY_NOT_MET',
+          delayMs: delay,
+        });
+        console.log('QUEUE_JOB_CREATED', {
+          jobId: newJobId,
+          scheduledEmailId: email.id,
+          delay,
+        });
+
         await emailQueue.add(
           'send-email',
           { scheduledEmailId: email.id },
           {
             delay,
-            jobId: `delay_${email.id}_${Date.now()}`,
+            jobId: newJobId,
           }
         );
         return;
@@ -82,10 +100,11 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
       if (rateLimit.reason === 'HOURLY_LIMIT_REACHED') {
         const nextDate = rateLimit.nextWindowDate || new Date(Date.now() + 3600000);
 
-        console.log('RATE_LIMIT_REACHED', {
+        console.log('JOB_RATE_LIMITED', {
           emailId: email.id,
           sender: email.senderRef.email,
           hourlyLimit: email.campaignRef.hourlyLimit,
+          nextWindowDate: nextDate.toISOString(),
         });
 
         await prisma.scheduledEmail.update({
@@ -123,17 +142,34 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
         await searchService.updateEmailStatus(email.id, 'RATE_LIMITED');
 
         const delay = Math.max(1000, rateLimit.retryAfterMs || 3600000);
+        const newJobId = `window_${email.id}_${nextDate.getTime()}`;
+        console.log('JOB_RESCHEDULED', {
+          emailId: email.id,
+          reason: 'HOURLY_LIMIT_REACHED',
+          delayMs: delay,
+        });
+        console.log('QUEUE_JOB_CREATED', {
+          jobId: newJobId,
+          scheduledEmailId: email.id,
+          delay,
+        });
+
         await emailQueue.add(
           'send-email',
           { scheduledEmailId: email.id },
           {
             delay,
-            jobId: `window_${email.id}_${nextDate.getTime()}`,
+            jobId: newJobId,
           }
         );
         return;
       }
     }
+
+    console.log('EMAIL_SEND_STARTED', {
+      emailId: email.id,
+      recipient: email.recipientEmail,
+    });
 
     const sendResult = await sendEmailViaSmtp({
       fromName: email.senderRef.name,
@@ -145,6 +181,12 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
       senderPort: email.senderRef.port,
       senderUser: email.senderRef.user,
       senderPass: email.senderRef.pass,
+    });
+
+    console.log('EMAIL_SEND_SUCCESS', {
+      emailId: email.id,
+      recipient: email.recipientEmail,
+      messageId: sendResult.messageId,
     });
 
     const now = new Date();
@@ -192,6 +234,11 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
     await releaseEmailLock(email.id);
 
     const errorMessage = err?.message || 'Unknown SMTP dispatch failure';
+    console.log('EMAIL_SEND_FAILED', {
+      emailId: email.id,
+      recipient: email.recipientEmail,
+      error: errorMessage,
+    });
 
     await prisma.$transaction([
       prisma.scheduledEmail.update({
@@ -210,6 +257,24 @@ export const processEmailJob = async (job: Job<EmailJobData>): Promise<void> => 
     ]);
 
     await searchService.updateEmailStatus(email.id, 'FAILED', null, errorMessage);
+
+    const updatedCampaign = await prisma.campaign.findUnique({
+      where: { id: email.campaignId },
+    });
+
+    if (
+      updatedCampaign &&
+      updatedCampaign.sentCount + updatedCampaign.failedCount >= updatedCampaign.totalRecipients
+    ) {
+      await prisma.campaign.update({
+        where: { id: email.campaignId },
+        data: {
+          status: 'PARTIALLY_FAILED',
+        },
+      });
+    }
+
+    throw err;
   }
 };
 
@@ -227,6 +292,18 @@ export const createEmailWorker = () => {
       lockDuration: 30000,
     }
   );
+
+  worker.on('completed', (job: Job) => {
+    console.log('JOB_COMPLETED', { jobId: job.id });
+  });
+
+  worker.on('failed', (job: Job | undefined, err: Error) => {
+    console.log('JOB_FAILED', { jobId: job?.id, error: err.message });
+  });
+
+  worker.on('error', (err: Error) => {
+    console.error('WORKER_ERROR', { error: err.message });
+  });
 
   return worker;
 };

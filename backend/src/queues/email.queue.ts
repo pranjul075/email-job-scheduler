@@ -10,11 +10,7 @@ export interface EmailJobData {
 export const emailQueue = new Queue<EmailJobData>(EMAIL_QUEUE_NAME, {
   connection: redisConnection,
   defaultJobOptions: {
-    attempts: 5,
-    backoff: {
-      type: 'exponential',
-      delay: 5000,
-    },
+    attempts: 1,
     removeOnComplete: {
       count: 1000,
     },

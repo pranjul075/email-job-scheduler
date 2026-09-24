@@ -146,6 +146,13 @@ export const scheduleCampaign = async (input: CreateCampaignInput) => {
   for (let i = 0; i < bullJobs.length; i += BATCH_SIZE) {
     const chunk = bullJobs.slice(i, i + BATCH_SIZE);
     await emailQueue.addBulk(chunk);
+    for (const job of chunk) {
+      console.log('QUEUE_JOB_CREATED', {
+        jobId: job.opts.jobId,
+        scheduledEmailId: job.data.scheduledEmailId,
+        delay: job.opts.delay,
+      });
+    }
   }
 
   for (const item of scheduledRecords) {
