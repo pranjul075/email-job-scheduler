@@ -587,7 +587,7 @@ npm run dev
 
 | Service | URL |
 |---|---|
-| Frontend dashboard | http://localhost:5174 |
+| Frontend dashboard | http://localhost:5178 |
 | Backend health check | http://localhost:4002/health |
 | Bull Board | http://localhost:4002/admin/queues |
 
