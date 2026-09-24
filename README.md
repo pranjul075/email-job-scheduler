@@ -596,7 +596,7 @@ npm run dev
 ##  API Reference
 
 <details>
-<summary><b>🔐 Authentication</b></summary>
+<summary><b> Authentication</b></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -620,7 +620,7 @@ npm run dev
 </details>
 
 <details>
-<summary><b>📅 Campaigns and scheduling</b></summary>
+<summary><b> Campaigns and scheduling</b></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -631,7 +631,7 @@ npm run dev
 </details>
 
 <details>
-<summary><b>✉️ Emails</b></summary>
+<summary><b> Emails</b></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -644,7 +644,7 @@ npm run dev
 </details>
 
 <details>
-<summary><b>💬 Slack</b></summary>
+<summary><b> Slack</b></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
